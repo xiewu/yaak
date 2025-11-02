@@ -1,9 +1,11 @@
-import type { BatchUpsertResult } from '@yaakapp-internal/models';
+import type { BatchUpsertResult, Folder, HttpRequest } from '@yaakapp-internal/models';
+import { environmentsAtom, foldersAtom, httpRequestsAtom } from '@yaakapp-internal/models';
+import type { ImportResources } from '@yaakapp-internal/plugins';
 import { Button } from '../components/core/Button';
 import { FormattedError } from '../components/core/FormattedError';
 import { VStack } from '../components/core/Stacks';
 import { ImportDataDialog } from '../components/ImportDataDialog';
-import { activeWorkspaceAtom } from '../hooks/useActiveWorkspace';
+import { activeWorkspaceAtom, activeWorkspaceIdAtom } from '../hooks/useActiveWorkspace';
 import { createFastMutation } from '../hooks/useFastMutation';
 import { showAlert } from './alert';
 import { showDialog } from './dialog';
@@ -51,11 +53,113 @@ export const importData = createFastMutation({
 
 async function performImport(filePath: string): Promise<boolean> {
   const activeWorkspace = jotaiStore.get(activeWorkspaceAtom);
-  const imported = await invokeCmd<BatchUpsertResult>('cmd_import_data', {
-    filePath,
+  const resources = await invokeCmd<ImportResources>('cmd_get_import_result', {
     workspaceId: activeWorkspace?.id,
+    filePath,
   });
 
+  const imported = await new Promise<BatchUpsertResult>((resolve) => {
+    showDialog({
+      id: 'import-location',
+      title: 'Import Resources',
+      render: ({ hide }) => {
+        return (
+          <div>
+            <Button
+              onClick={async () => {
+                const workspaceId = jotaiStore.get(activeWorkspaceIdAtom);
+                if (workspaceId == null) return;
+
+                const newResources = structuredClone(resources);
+                newResources.workspaces = [];
+
+                console.log('IMPORTING', JSON.parse(JSON.stringify(resources, null, 1)));
+                const idMap: Record<string, string> = {};
+
+                const getParentNames = (m: HttpRequest | Folder): string[] => {
+                  const parent = [...folders, ...resources.folders].find(
+                    (f) => (idMap[f.id] ?? f.id) === (idMap[m.folderId ?? 'n/a'] ?? m.folderId),
+                  );
+                  if (parent == null) return [];
+                  return [parent.name, ...getParentNames(parent)];
+                };
+
+                const folders = jotaiStore.get(foldersAtom);
+                for (const toImport of newResources.folders) {
+                  const parentsKey = getParentNames(toImport).join('::');
+                  const existing = folders.find(
+                    (m) => m.name === toImport.name && getParentNames(m).join('::') === parentsKey,
+                  );
+                  toImport.workspaceId = workspaceId;
+                  if (existing) {
+                    idMap[toImport.id] = existing.id;
+
+                    toImport.id = existing.id;
+                    toImport.folderId = existing.folderId;
+                  }
+                }
+
+                const environments = jotaiStore.get(environmentsAtom);
+                for (const toImport of newResources.environments) {
+                  const existing = environments.find((m) => m.name === toImport.name);
+                  toImport.workspaceId = workspaceId;
+                  if (existing) {
+                    toImport.id = existing.id;
+                  }
+                }
+
+                const httpRequests = jotaiStore.get(httpRequestsAtom);
+                for (const toImport of newResources.httpRequests) {
+                  const parentsKey = getParentNames(toImport).join('::');
+                  console.log('IMPORTING REQUEST', parentsKey, toImport.name);
+                  const existing = httpRequests.find((m) => {
+                    return (
+                      m.name === toImport.name &&
+                      m.url === toImport.url &&
+                      m.method === toImport.method &&
+                      getParentNames(m).join('::') === parentsKey
+                    );
+                  });
+                  toImport.workspaceId = workspaceId;
+                  if (existing) {
+                    console.log('EXISTING');
+                    toImport.id = existing.id;
+                    toImport.folderId = existing.folderId;
+                  } else {
+                    console.log('NEW', toImport);
+                  }
+                }
+
+                console.log('UPSERTING', newResources);
+                const imported = await invokeCmd<BatchUpsertResult>('cmd_import_data', {
+                  workspaceId: activeWorkspace?.id,
+                  resources: newResources,
+                });
+                resolve(imported);
+                hide();
+              }}
+            >
+              Import into current
+            </Button>
+            <Button
+              onClick={async () => {
+                const imported = await invokeCmd<BatchUpsertResult>('cmd_import_data', {
+                  workspaceId: activeWorkspace?.id,
+                  resources,
+                });
+                resolve(imported);
+                hide();
+              }}
+            >
+              Import into new
+            </Button>
+          </div>
+        );
+      },
+    });
+  });
+
+  console.log('IMPORTED', imported);
   const importedWorkspace = imported.workspaces[0];
 
   showDialog({

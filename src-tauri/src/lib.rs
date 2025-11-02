@@ -4,7 +4,7 @@ use crate::error::Error::GenericError;
 use crate::error::Result;
 use crate::grpc::{build_metadata, metadata_to_map, resolve_grpc_request};
 use crate::http_request::{resolve_http_request, send_http_request};
-use crate::import::import_data;
+use crate::import::{get_import_result, import_data};
 use crate::notifications::YaakNotifier;
 use crate::render::{render_grpc_request, render_template};
 use crate::updates::{UpdateMode, UpdateTrigger, YaakUpdater};
@@ -38,14 +38,7 @@ use yaak_models::models::{
 };
 use yaak_models::query_manager::QueryManagerExt;
 use yaak_models::util::{BatchUpsertResult, UpdateSource, get_workspace_export_resources};
-use yaak_plugins::events::{
-    CallGrpcRequestActionArgs, CallGrpcRequestActionRequest, CallHttpRequestActionArgs,
-    CallHttpRequestActionRequest, Color, FilterResponse, GetGrpcRequestActionsResponse,
-    GetHttpAuthenticationConfigResponse, GetHttpAuthenticationSummaryResponse,
-    GetHttpRequestActionsResponse, GetTemplateFunctionConfigResponse,
-    GetTemplateFunctionSummaryResponse, InternalEvent, InternalEventPayload, JsonPrimitive,
-    PluginWindowContext, RenderPurpose, ShowToastRequest,
-};
+use yaak_plugins::events::{CallGrpcRequestActionArgs, CallGrpcRequestActionRequest, CallHttpRequestActionArgs, CallHttpRequestActionRequest, Color, FilterResponse, GetGrpcRequestActionsResponse, GetHttpAuthenticationConfigResponse, GetHttpAuthenticationSummaryResponse, GetHttpRequestActionsResponse, GetTemplateFunctionConfigResponse, GetTemplateFunctionSummaryResponse, ImportResources, ImportResponse, InternalEvent, InternalEventPayload, JsonPrimitive, PluginWindowContext, RenderPurpose, ShowToastRequest};
 use yaak_plugins::manager::PluginManager;
 use yaak_plugins::plugin_meta::PluginMetadata;
 use yaak_plugins::template_callback::PluginTemplateCallback;
@@ -807,9 +800,17 @@ async fn cmd_get_sse_events(file_path: &str) -> YaakResult<Vec<ServerSentEvent>>
 #[tauri::command]
 async fn cmd_import_data<R: Runtime>(
     window: WebviewWindow<R>,
-    file_path: &str,
+    resources: ImportResources,
 ) -> YaakResult<BatchUpsertResult> {
-    import_data(&window, file_path).await
+    Ok(import_data(&window, resources)?)
+}
+
+#[tauri::command]
+async fn cmd_get_import_result<R: Runtime>(
+    window: WebviewWindow<R>,
+    file_path: &str,
+) -> YaakResult<ImportResources> {
+    Ok(get_import_result(&window, file_path).await?)
 }
 
 #[tauri::command]
@@ -1434,6 +1435,7 @@ pub fn run() {
             cmd_grpc_reflect,
             cmd_grpc_request_actions,
             cmd_http_request_actions,
+            cmd_get_import_result,
             cmd_import_data,
             cmd_install_plugin,
             cmd_metadata,

@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::import::import_data;
+use crate::import::{get_import_result, import_data};
 use log::{info, warn};
 use std::collections::HashMap;
 use std::fs;
@@ -98,7 +98,8 @@ pub(crate) async fn handle_deep_link<R: Runtime>(
                 }
             };
 
-            let results = import_data(window, &file_path).await?;
+            let resources = get_import_result(window, &file_path).await?;
+            let results = import_data(window, resources)?;
             window.emit(
                 "show_toast",
                 ShowToastRequest {
